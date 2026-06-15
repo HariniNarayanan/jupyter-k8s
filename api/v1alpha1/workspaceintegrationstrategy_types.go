@@ -35,6 +35,16 @@ type WorkspaceIntegrationStrategySpec struct {
 	// +optional
 	ResourceLookup *ResourceLookup `json:"resourceLookup,omitempty"`
 
+	// ShareProcessNamespace enables a shared PID namespace across all containers in the
+	// workspace pod, so the workspace container can see and signal processes running in
+	// injected sidecars (e.g. the Ray sidecar). Mirrors corev1.PodSpec.ShareProcessNamespace.
+	//
+	// Admin-controlled (this field only exists on the integration strategy, which admins
+	// install). Containers sharing a PID namespace can read each other's /proc (filesystem
+	// and environment); injected containers should run as non-root.
+	// +optional
+	ShareProcessNamespace *bool `json:"shareProcessNamespace,omitempty"`
+
 	// DeploymentModifications defines modifications to apply to workspace deployments
 	// with template expressions in string fields
 	// +optional

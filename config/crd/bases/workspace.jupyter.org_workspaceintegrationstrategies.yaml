@@ -5152,6 +5152,16 @@ spec:
                 - kind
                 - name
                 type: object
+              shareProcessNamespace:
+                description: |-
+                  ShareProcessNamespace enables a shared PID namespace across all containers in the
+                  workspace pod, so the workspace container can see and signal processes running in
+                  injected sidecars (e.g. the Ray sidecar). Mirrors corev1.PodSpec.ShareProcessNamespace.
+
+                  Admin-controlled (this field only exists on the integration strategy, which admins
+                  install). Containers sharing a PID namespace can read each other's /proc (filesystem
+                  and environment); injected containers should run as non-root.
+                type: boolean
             required:
             - displayName
             type: object

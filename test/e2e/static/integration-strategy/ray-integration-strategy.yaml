@@ -5,6 +5,7 @@ metadata:
   namespace: default
 spec:
   displayName: Ray Cluster Connector
+  shareProcessNamespace: true
   resourceLookup:
     apiVersion: ray.io/v1
     kind: RayCluster

@@ -6,6 +6,7 @@ Distributed under the terms of the MIT license
 package controller
 
 import (
+	"context"
 	"testing"
 
 	workspacev1alpha1 "github.com/jupyter-infra/jupyter-k8s/api/v1alpha1"
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -274,3 +276,79 @@ func TestEnvVarMergeSemantics(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Pipeline tests are in resource_manager_integration_test.go
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// shareProcessNamespace (pod-level, applied independently of podModifications)
+// ---------------------------------------------------------------------------
+
+func TestApplyIntegrationStrategyShareProcessNamespace(t *testing.T) {
+	ctx := context.Background()
+	boolPtr := func(b bool) *bool { return &b }
+
+	// workspaceWithRef returns a workspace that references the strategy so that
+	// ApplyIntegrationStrategyToDeployment can read its parameters.
+	workspaceWithRef := func() *workspacev1alpha1.Workspace {
+		return &workspacev1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{Name: "ws", Namespace: "ns"},
+			Spec: workspacev1alpha1.WorkspaceSpec{
+				IntegrationStrategy: &workspacev1alpha1.IntegrationStrategyRef{Name: "strat"},
+			},
+		}
+	}
+
+	t.Run("sets shareProcessNamespace=true with no podModifications (flag-only)", func(t *testing.T) {
+		db := &DeploymentBuilder{}
+		deployment := baseDeployment()
+		strategy := &workspacev1alpha1.WorkspaceIntegrationStrategy{
+			ObjectMeta: metav1.ObjectMeta{Name: "strat"},
+			Spec: workspacev1alpha1.WorkspaceIntegrationStrategySpec{
+				DisplayName:           "no pod mods",
+				ShareProcessNamespace: boolPtr(true),
+				// No DeploymentModifications: exercises the path where the
+				// podModifications guard would otherwise early-return.
+			},
+		}
+
+		err := db.ApplyIntegrationStrategyToDeployment(ctx, deployment, workspaceWithRef(), strategy)
+		require.NoError(t, err)
+		require.NotNil(t, deployment.Spec.Template.Spec.ShareProcessNamespace)
+		assert.True(t, *deployment.Spec.Template.Spec.ShareProcessNamespace)
+	})
+
+	t.Run("leaves shareProcessNamespace nil when unset on the strategy", func(t *testing.T) {
+		db := &DeploymentBuilder{}
+		deployment := baseDeployment()
+		strategy := &workspacev1alpha1.WorkspaceIntegrationStrategy{
+			ObjectMeta: metav1.ObjectMeta{Name: "strat"},
+			Spec: workspacev1alpha1.WorkspaceIntegrationStrategySpec{
+				DisplayName: "unset",
+			},
+		}
+
+		err := db.ApplyIntegrationStrategyToDeployment(ctx, deployment, workspaceWithRef(), strategy)
+		require.NoError(t, err)
+		assert.Nil(t, deployment.Spec.Template.Spec.ShareProcessNamespace,
+			"unset strategy field must leave the pod template value nil")
+	})
+
+	t.Run("clears a previously-set value back to nil (reversible)", func(t *testing.T) {
+		db := &DeploymentBuilder{}
+		deployment := baseDeployment()
+		// Simulate an existing pod template that previously had it enabled.
+		deployment.Spec.Template.Spec.ShareProcessNamespace = boolPtr(true)
+
+		strategy := &workspacev1alpha1.WorkspaceIntegrationStrategy{
+			ObjectMeta: metav1.ObjectMeta{Name: "strat"},
+			Spec: workspacev1alpha1.WorkspaceIntegrationStrategySpec{
+				DisplayName: "now unset",
+				// ShareProcessNamespace nil: the rebuilt desired deployment must
+				// reflect nil so NeedsUpdate rolls the pod back to unshared.
+			},
+		}
+
+		err := db.ApplyIntegrationStrategyToDeployment(ctx, deployment, workspaceWithRef(), strategy)
+		require.NoError(t, err)
+		assert.Nil(t, deployment.Spec.Template.Spec.ShareProcessNamespace,
+			"clearing the strategy field must reset the pod template value to nil")
+	})
+}

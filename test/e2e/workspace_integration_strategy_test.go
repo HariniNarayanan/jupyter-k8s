@@ -98,6 +98,12 @@ var _ = Describe("Workspace Integration Strategy", Ordered, func() {
 				"{.spec.template.spec.containers[0].env[?(@.name=='RAY_CLUSTER_NAME')].value}")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(clusterNameEnv).To(Equal("demo-cluster"))
+
+			By("verifying shareProcessNamespace was enabled on the pod template")
+			shareProcessNamespace, err := kubectlGet("deployment", deploymentName, workspaceNamespace,
+				"{.spec.template.spec.shareProcessNamespace}")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(shareProcessNamespace).To(Equal("true"))
 		})
 	})
 

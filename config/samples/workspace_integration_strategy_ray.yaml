@@ -31,6 +31,13 @@ metadata:
 spec:
   displayName: "Ray Cluster Connector"   # human-facing label shown in an integration picker UI
 
+  # shareProcessNamespace: the workspace container must see the Ray process that runs in the
+  # ray-sidecar (the workspace attaches to the local Ray session the sidecar starts). A shared
+  # PID namespace makes the sidecar's processes visible to — and signalable by — the workspace
+  # container. Both run as uid 1000 (see the sidecar securityContext), so the cross-container
+  # signal/attach works without granting root.
+  shareProcessNamespace: true
+
   # resourceLookup: fetch the customer-named RayCluster at reconcile time so we can read live
   # values from it (head image, head service name, GCS port). name/namespace support templates.
   resourceLookup:
