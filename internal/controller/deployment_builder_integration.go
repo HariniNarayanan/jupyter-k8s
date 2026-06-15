@@ -49,7 +49,17 @@ func (db *DeploymentBuilder) ApplyIntegrationStrategyToDeployment(
 		"strategy", strategy.Name,
 		"namespace", strategy.Namespace)
 
-	// Nothing to apply if there are no deployment modifications
+	// Pod-level settings that apply regardless of podModifications.
+	//
+	// ShareProcessNamespace is assigned directly (propagating nil) so the desired pod
+	// template is a pure function of the strategy: setting it true enables a shared PID
+	// namespace; clearing it on the strategy resets the pod template to nil on the next
+	// reconcile (NeedsUpdate rebuilds the desired deployment from scratch and rolls the
+	// pod), so the change is reversible. This must run before the podModifications guard
+	// below, since a strategy may set shareProcessNamespace without any podModifications.
+	deployment.Spec.Template.Spec.ShareProcessNamespace = strategy.Spec.ShareProcessNamespace
+
+	// Nothing further to apply if there are no deployment modifications
 	if strategy.Spec.DeploymentModifications == nil ||
 		strategy.Spec.DeploymentModifications.PodModifications == nil {
 		return nil

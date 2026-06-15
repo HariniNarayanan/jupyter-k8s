@@ -745,6 +745,11 @@ func (in *WorkspaceIntegrationStrategySpec) DeepCopyInto(out *WorkspaceIntegrati
 		*out = new(ResourceLookup)
 		**out = **in
 	}
+	if in.ShareProcessNamespace != nil {
+		in, out := &in.ShareProcessNamespace, &out.ShareProcessNamespace
+		*out = new(bool)
+		**out = **in
+	}
 	if in.DeploymentModifications != nil {
 		in, out := &in.DeploymentModifications, &out.DeploymentModifications
 		*out = new(DeploymentModifications)
