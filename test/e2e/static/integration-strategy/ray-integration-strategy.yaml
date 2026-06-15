@@ -1,7 +1,7 @@
 apiVersion: workspace.jupyter.org/v1alpha1
 kind: WorkspaceIntegrationStrategy
 metadata:
-  name: ray-connector
+  name: ray-integration-strategy
   namespace: default
 spec:
   displayName: Ray Cluster Connector

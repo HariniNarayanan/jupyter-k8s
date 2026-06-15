@@ -57,7 +57,7 @@ var _ = Describe("Workspace Integration Strategy", Ordered, func() {
 			applyIntegrationFixture("raycluster")
 
 			By("creating the integration strategy")
-			applyIntegrationFixture("ray-connector-strategy")
+			applyIntegrationFixture("ray-integration-strategy")
 
 			By("creating a workspace referencing the integration strategy")
 			createWorkspaceForTest(workspaceName, groupDir, "")
@@ -106,7 +106,7 @@ var _ = Describe("Workspace Integration Strategy", Ordered, func() {
 			workspaceName := "workspace-missing-resource"
 
 			By("creating the integration strategy (no matching RayCluster will exist)")
-			applyIntegrationFixture("ray-connector-strategy")
+			applyIntegrationFixture("ray-integration-strategy")
 
 			By("creating a workspace whose parameter points to a nonexistent RayCluster")
 			createWorkspaceForTest(workspaceName, groupDir, "")
@@ -129,7 +129,7 @@ var _ = Describe("Workspace Integration Strategy", Ordered, func() {
 			applyIntegrationFixture("raycluster")
 
 			By("creating the integration strategy")
-			applyIntegrationFixture("ray-connector-strategy")
+			applyIntegrationFixture("ray-integration-strategy")
 
 			By("creating a workspace referencing the integration strategy")
 			createWorkspaceForTest(workspaceName, groupDir, "")
@@ -153,7 +153,7 @@ var _ = Describe("Workspace Integration Strategy", Ordered, func() {
 				`{"name":"RAY_HEAD_SERVICE","valueTemplate":"{{ resource \"{.status.head.serviceName}\" }}"},` +
 				`{"name":"RAY_CLUSTER_NAME","valueTemplate":"{{ .Parameters.rayClusterName }}"},` +
 				`{"name":"RAY_EXTRA","valueTemplate":"injected"}]}}}}}`
-			cmd := exec.Command("kubectl", "patch", "workspaceintegrationstrategy", "ray-connector",
+			cmd := exec.Command("kubectl", "patch", "workspaceintegrationstrategy", "ray-integration-strategy",
 				"-n", workspaceNamespace, "--type=merge", "-p", patchCmd)
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())

@@ -7,7 +7,7 @@ spec:
   desiredStatus: Running
   image: jk8s-application-jupyter-uv:latest
   integrationStrategy:
-    name: ray-connector
+    name: ray-integration-strategy
     parameters:
       - name: rayClusterName
         value: nonexistent-cluster
