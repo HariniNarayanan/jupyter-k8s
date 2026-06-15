@@ -27,7 +27,7 @@ metadata:
   labels:
     app.kubernetes.io/name: jupyter-k8s
     app.kubernetes.io/managed-by: kustomize
-  name: ray-connector
+  name: ray-integration-strategy
 spec:
   displayName: "Ray Cluster Connector"   # human-facing label shown in an integration picker UI
 
@@ -192,7 +192,7 @@ spec:
   # Parameters are a name/value list (extensible per-entry; values are strings interpolated into
   # the strategy's templates). The UI pre-fills rayClusterNamespace with the workspace's namespace.
   integrationStrategy:
-    name: ray-connector
+    name: ray-integration-strategy
     parameters:
       - name: rayClusterName
         value: demo-cluster
