@@ -346,7 +346,19 @@ func SetupWorkspaceController(mgr mngr.Manager, options WorkspaceControllerOptio
 	eventRecorder := mgr.GetEventRecorderFor("workspace-controller")
 	idleChecker := NewWorkspaceIdleChecker(k8sClient, options.IdleCheckInterval)
 	accessStartupProber := NewAccessStartupProber(NewAccessResourcesBuilder())
-	stateMachine := NewStateMachine(resourceManager, statusManager, eventRecorder, idleChecker, accessStartupProber)
+
+	// Integration status prober (report-only). If pod-exec config is unavailable, leave it nil so the
+	// probe step is skipped rather than failing controller setup -- the freeze/overlay path is unaffected.
+	var integrationProber IntegrationProberInterface
+	if execUtil, execErr := NewPodExecUtil(); execErr != nil {
+		logf.Log.WithName("workspace-controller").Error(execErr,
+			"pod exec unavailable; integration status probes disabled")
+	} else {
+		integrationProber = NewIntegrationProber(k8sClient, execUtil)
+	}
+
+	stateMachine := NewStateMachine(
+		resourceManager, statusManager, eventRecorder, idleChecker, accessStartupProber, integrationProber)
 
 	// Create plugin clients for pod event handling (if configured)
 	pluginClients := map[string]plugin.RemoteAccessPluginApis{}
