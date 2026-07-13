@@ -1,0 +1,60 @@
+apiVersion: workspace.jupyter.org/v1alpha1
+kind: WorkspaceIntegrationTemplate
+metadata:
+  name: ray-integration
+  namespace: default
+spec:
+  displayName: Ray Cluster Integration
+  # parameters declares the contract: every {{ .Parameters.X }} the template uses must be declared here,
+  # and a referencing workspace must supply each. The validating webhook rejects an undeclared reference
+  # (author typo) or a workspace that omits one. Only rayClusterName is user-supplied; the namespace uses
+  # {{ .Workspace.Namespace }}, which is not a parameter.
+  parameters:
+    - name: rayClusterName
+  # shareProcessNamespace is a static pod-level toggle (no resolution). The deployment builder
+  # OR-reduces it onto the pod; the e2e asserts the pod ends up with spec.shareProcessNamespace: true.
+  shareProcessNamespace: true
+  # KRO-style external reference: the operator fetches this RayCluster at reconcile time, captures
+  # the {{ resource ... }} values, and FREEZES them into workspace.status.resolvedIntegrations. The
+  # `name` field is the handle referenced by {{ resource "rayCluster" ... }} below.
+  resourceRefs:
+    - name: rayCluster
+      apiVersion: ray.io/v1
+      kind: RayCluster
+      metadata:
+        name: "{{ .Parameters.rayClusterName }}"
+        namespace: "{{ .Workspace.Namespace }}"
+  # statusProbe is run by the operator against the workspace pod and its verdict is recorded in
+  # workspace.status.integrationStatuses[]. The command carries a {{ resource }} expression that the
+  # operator MUST resolve from the frozen values before exec -- it compares the resolved head service
+  # name against the known value, so it exits 0 (Ready) ONLY if resolution happened. If the operator ever
+  # regresses to exec'ing the literal "{{ resource ... }}" string, this test compares the literal against
+  # the expected value, fails, and the integration reports Degraded -- catching the probe-resolution bug.
+  # (No `ray` binary needed: sh + test exist in the workspace image.)
+  statusProbe:
+    exec:
+      command:
+        - /bin/sh
+        - -c
+        # Double-quoted YAML scalar (same escaping the sidecar args below use): YAML turns \" into a
+        # literal ", so the resolver receives a well-formed {{ resource "rayCluster" ... }} action. The
+        # shell then compares the RESOLVED head service name against the known value.
+        - "[ \"{{ resource \"rayCluster\" \"{.status.head.serviceName}\" }}\" = demo-cluster-head-svc ]"
+    periodSeconds: 5
+  deploymentModifications:
+    podModifications:
+      additionalContainers:
+        - name: ray-sidecar
+          image: '{{ resource "rayCluster" "{.spec.headGroupSpec.template.spec.containers[0].image}" }}'
+          # command wraps args in a shell so the resolved args string is interpreted (matching the
+          # production sample). The e2e asserts the RESOLVED args value, not a live Ray join, so the
+          # sidecar just needs to stay running: echo the resolved address, then sleep.
+          command: ["/bin/sh", "-c"]
+          args:
+            - "echo ray start --address={{ resource \"rayCluster\" \"{.status.head.serviceName}\" }}:6379 --block && sleep infinity"
+      primaryContainerModifications:
+        mergeEnv:
+          - name: RAY_HEAD_SERVICE
+            valueTemplate: '{{ resource "rayCluster" "{.status.head.serviceName}" }}'
+          - name: RAY_CLUSTER_NAME
+            valueTemplate: "{{ .Parameters.rayClusterName }}"

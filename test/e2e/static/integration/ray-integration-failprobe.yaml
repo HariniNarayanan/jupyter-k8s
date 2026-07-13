@@ -1,0 +1,37 @@
+apiVersion: workspace.jupyter.org/v1alpha1
+kind: WorkspaceIntegrationTemplate
+metadata:
+  name: ray-integration-failprobe
+  namespace: default
+spec:
+  displayName: Ray Cluster Integration (failing status probe)
+  # Identical to ray-integration EXCEPT the statusProbe command is `false` (always exits non-zero).
+  # Used to prove the report-only contract: a failing statusProbe must surface Degraded on
+  # status.integrationStatuses[] WITHOUT dropping the Workspace's Available condition.
+  parameters:
+    - name: rayClusterName
+  shareProcessNamespace: true
+  resourceRefs:
+    - name: rayCluster
+      apiVersion: ray.io/v1
+      kind: RayCluster
+      metadata:
+        name: "{{ .Parameters.rayClusterName }}"
+        namespace: "{{ .Workspace.Namespace }}"
+  # `false` always exits 1 -> the probe verdict is ProbeFailed/Degraded, deterministically.
+  statusProbe:
+    exec:
+      command: ["false"]
+    periodSeconds: 5
+  deploymentModifications:
+    podModifications:
+      additionalContainers:
+        - name: ray-sidecar
+          image: '{{ resource "rayCluster" "{.spec.headGroupSpec.template.spec.containers[0].image}" }}'
+          command: ["/bin/sh", "-c"]
+          args:
+            - "echo ray start --address={{ resource \"rayCluster\" \"{.status.head.serviceName}\" }}:6379 --block && sleep infinity"
+      primaryContainerModifications:
+        mergeEnv:
+          - name: RAY_HEAD_SERVICE
+            valueTemplate: '{{ resource "rayCluster" "{.status.head.serviceName}" }}'

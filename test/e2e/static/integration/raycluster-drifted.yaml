@@ -1,0 +1,19 @@
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: demo-cluster
+  namespace: default
+spec:
+  headGroupSpec:
+    template:
+      spec:
+        containers:
+          - name: ray-head
+            image: rayproject/ray:2.9.0
+status:
+  head:
+    # DRIFTED value: same cluster (demo-cluster), but its head service name changed underneath the
+    # workspace. Because the integration's parametersHash (templateRef + parameters) and observedIntegrationTemplateVersion are UNCHANGED, 2b must
+    # replay the FROZEN demo-cluster-head-svc and must NOT re-read this drifted value -- the pod must
+    # not roll. This is the core drift-no-roll guarantee.
+    serviceName: demo-cluster-head-svc-DRIFTED
