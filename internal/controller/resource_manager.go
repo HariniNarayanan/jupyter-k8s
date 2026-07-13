@@ -29,6 +29,10 @@ type ResourceManager struct {
 	pvcBuilder             *PVCBuilder
 	accessResourcesBuilder *AccessResourcesBuilder
 	statusManager          *StatusManager
+	// integrationTemplateNamespace is the shared namespace an integration template may live in, in
+	// addition to the workspace's own namespace (the WorkspaceTemplate shared-namespace fallback).
+	// Empty disables the fallback (own-namespace only).
+	integrationTemplateNamespace string
 }
 
 // NewResourceManager creates a new ResourceManager
@@ -41,14 +45,23 @@ func NewResourceManager(
 	accessResourcesBuilder *AccessResourcesBuilder,
 	statusManager *StatusManager,
 ) *ResourceManager {
+	// Reuse the shared-namespace setting the DeploymentBuilder already carries (from
+	// WorkspaceControllerOptions.DefaultTemplateNamespace) so integration templates get the same
+	// shared-namespace fallback as WorkspaceTemplates, without widening this constructor's signature.
+	// deploymentBuilder is nil in some unit tests that don't exercise the integration path.
+	sharedNamespace := ""
+	if deploymentBuilder != nil {
+		sharedNamespace = deploymentBuilder.options.DefaultTemplateNamespace
+	}
 	return &ResourceManager{
-		client:                 k8sClient,
-		scheme:                 scheme,
-		deploymentBuilder:      deploymentBuilder,
-		serviceBuilder:         serviceBuilder,
-		pvcBuilder:             pvcBuilder,
-		accessResourcesBuilder: accessResourcesBuilder,
-		statusManager:          statusManager,
+		client:                       k8sClient,
+		scheme:                       scheme,
+		deploymentBuilder:            deploymentBuilder,
+		serviceBuilder:               serviceBuilder,
+		pvcBuilder:                   pvcBuilder,
+		accessResourcesBuilder:       accessResourcesBuilder,
+		statusManager:                statusManager,
+		integrationTemplateNamespace: sharedNamespace,
 	}
 }
 
@@ -95,7 +108,7 @@ func (rm *ResourceManager) getPVC(ctx context.Context, workspace *workspacev1alp
 func (rm *ResourceManager) createDeployment(ctx context.Context, workspace *workspacev1alpha1.Workspace, accessStrategy *workspacev1alpha1.WorkspaceAccessStrategy) (*appsv1.Deployment, error) {
 	logger := logf.FromContext(ctx)
 
-	deployment, err := rm.deploymentBuilder.BuildDeploymentWithAccessStrategy(ctx, workspace, accessStrategy)
+	deployment, err := rm.deploymentBuilder.BuildWorkspaceDeployment(ctx, workspace, accessStrategy)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build deployment: %w", err)
 	}
@@ -189,6 +202,17 @@ func (rm *ResourceManager) EnsureDeploymentExists(
 	ctx context.Context,
 	workspace *workspacev1alpha1.Workspace,
 	accessStrategy *workspacev1alpha1.WorkspaceAccessStrategy) (*appsv1.Deployment, error) {
+	// Integration workspaces: refresh the frozen resolution (status.resolvedIntegrations) BEFORE
+	// building the Deployment, so create/update below replay the current frozen values. Re-resolution
+	// happens only on an input-token change; a capture failure is non-fatal here (fail-closed --
+	// preserve the running pod) and is surfaced via the workspace's integration status elsewhere.
+	if rm.hasIntegrationTemplateRefs(workspace) {
+		if err := rm.reconcileIntegrations(ctx, workspace); err != nil {
+			logf.FromContext(ctx).Error(err, "integration freeze reconcile reported an error; proceeding with preserved frozen values",
+				"workspace", workspace.Name)
+		}
+	}
+
 	deployment, err := rm.getDeployment(ctx, workspace)
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -219,6 +243,17 @@ func (rm *ResourceManager) ensureDeploymentUpToDate(ctx context.Context, deploym
 
 	needsUpdate, err := rm.deploymentBuilder.NeedsUpdate(ctx, deployment, workspace, accessStrategy)
 	if err != nil {
+		// For an integration workspace, building the desired state can fail when a frozen integration
+		// cannot be replayed -- e.g. its referenced template was deleted, or edited to reference a value
+		// not in the frozen set. Fail-closed AND non-fatal: leave the running Deployment (and its
+		// already-injected sidecar) exactly as-is rather than rolling or blocking the reconcile. The
+		// integration's health surfaces separately via the status probe. Non-integration build errors
+		// remain fatal.
+		if rm.hasIntegrationTemplateRefs(workspace) {
+			logf.FromContext(ctx).Error(err, "cannot determine desired deployment; preserving running deployment unchanged",
+				"workspace", workspace.Name)
+			return deployment, nil
+		}
 		return nil, fmt.Errorf("failed to check if deployment needs update: %w", err)
 	}
 
@@ -243,8 +278,8 @@ func (rm *ResourceManager) updateDeployment(ctx context.Context, deployment *app
 		}
 	}
 
-	// Update the deployment spec using the builder with access strategy
-	updatedDeployment, err := rm.deploymentBuilder.BuildDeploymentWithAccessStrategy(ctx, workspace, accessStrategy)
+	// Update the deployment spec using the builder with access strategy (+ frozen integration overlays)
+	updatedDeployment, err := rm.deploymentBuilder.BuildWorkspaceDeployment(ctx, workspace, accessStrategy)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build updated deployment: %w", err)
 	}
