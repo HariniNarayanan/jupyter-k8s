@@ -379,13 +379,16 @@ func (v *WorkspaceCustomValidator) ValidateCreate(ctx context.Context, workspace
 
 	// Validate integrationTemplateRefs: reject a ref that targets a disallowed namespace, references a
 	// missing template, or omits a required parameter (all user errors, applied to every caller on create).
-	// Supplied-but-undeclared parameters are surfaced as non-blocking warnings.
+	// Supplied-but-undeclared parameters are surfaced as non-blocking warnings. The resolved templates are
+	// reused by the resource-access authorization below (no second load).
 	var warnings admission.Warnings
+	var integrationTemplates []*workspacev1alpha1.WorkspaceIntegrationTemplate
 	if v.integrationTemplateRefValidator != nil {
-		w, err := v.integrationTemplateRefValidator.Validate(ctx, workspace)
+		t, w, err := v.integrationTemplateRefValidator.Validate(ctx, workspace)
 		if err != nil {
 			return nil, err
 		}
+		integrationTemplates = t
 		warnings = append(warnings, w...)
 	}
 
@@ -407,6 +410,15 @@ func (v *WorkspaceCustomValidator) ValidateCreate(ctx context.Context, workspace
 	// Validate service account access
 	if err := v.serviceAccountValidator.ValidateServiceAccountAccess(ctx, workspace); err != nil {
 		return nil, err
+	}
+
+	// Authorize the user for every resource the integration templates reference (a permission check, so
+	// it runs after the controller/admin bypass). Last, so the cheap in-memory checks above reject before
+	// this issues a SubjectAccessReview per referenced resource.
+	if v.integrationTemplateRefValidator != nil {
+		if err := v.integrationTemplateRefValidator.ValidateGetResourceRefs(ctx, workspace, integrationTemplates); err != nil {
+			return warnings, err
+		}
 	}
 
 	return warnings, nil
@@ -433,18 +445,23 @@ func (v *WorkspaceCustomValidator) ValidateUpdate(ctx context.Context, oldWorksp
 		return nil, nil
 	}
 
-	// Validate integrationTemplateRefs -- AFTER the admin/controller bypass and only when the user
-	// actually changed the refs, mirroring how templateRef validation runs post-bypass on changed spec.
-	// This keeps a controller-driven update (finalizer/label) or an admin's out-of-band template edit
-	// (e.g. adding a required parameter to, or deleting, a template a live workspace already references)
-	// from wedging reconciliation: those paths either hit the admin bypass above or leave the refs
-	// unchanged here. Non-blocking warnings (unused parameters) are surfaced to the user.
+	// Integration validation runs only when the user actually changed the refs -- a controller
+	// finalizer/label update or an admin's out-of-band template edit/deletion leaves the refs untouched,
+	// so it never re-validates a live workspace against a possibly-missing template (which would wedge
+	// reconciliation). The same gate controls both the correctness pass here and the authorization pass
+	// below, so the templates loaded here are exactly the set authorization reuses (no second load).
+	refsChanged := integrationRefsChanged(&oldWorkspace.Spec, &newWorkspace.Spec)
+
+	// Validate integrationTemplateRefs -- AFTER the admin/controller bypass, mirroring how templateRef
+	// validation runs post-bypass on changed spec. Non-blocking warnings (unused parameters) are surfaced.
 	var warnings admission.Warnings
-	if v.integrationTemplateRefValidator != nil && integrationRefsChanged(&oldWorkspace.Spec, &newWorkspace.Spec) {
-		w, err := v.integrationTemplateRefValidator.Validate(ctx, newWorkspace)
+	var integrationTemplates []*workspacev1alpha1.WorkspaceIntegrationTemplate
+	if v.integrationTemplateRefValidator != nil && refsChanged {
+		t, w, err := v.integrationTemplateRefValidator.Validate(ctx, newWorkspace)
 		if err != nil {
 			return nil, err
 		}
+		integrationTemplates = t
 		warnings = append(warnings, w...)
 	}
 
@@ -487,6 +504,16 @@ func (v *WorkspaceCustomValidator) ValidateUpdate(ctx context.Context, oldWorksp
 	// Validate volume ownership (security check - applies to all users)
 	if err := v.volumeValidator.ValidateVolumeOwnership(ctx, newWorkspace); err != nil {
 		return nil, err
+	}
+
+	// Authorize the user for every resource the integration templates reference (a permission check, so
+	// it runs LAST -- after the cheap in-memory checks above -- and only for non-admins). Gated on the same
+	// refsChanged as the correctness pass: the authorized objects are a function of the refs and the
+	// immutable workspace namespace, so unchanged refs were already authorized when they were introduced.
+	if v.integrationTemplateRefValidator != nil && refsChanged {
+		if err := v.integrationTemplateRefValidator.ValidateGetResourceRefs(ctx, newWorkspace, integrationTemplates); err != nil {
+			return warnings, err
+		}
 	}
 
 	return warnings, nil

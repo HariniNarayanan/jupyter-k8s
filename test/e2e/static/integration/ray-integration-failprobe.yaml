@@ -22,7 +22,6 @@ spec:
   statusProbe:
     exec:
       command: ["false"]
-    periodSeconds: 5
   deploymentModifications:
     podModifications:
       additionalContainers:

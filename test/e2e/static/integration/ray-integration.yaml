@@ -40,7 +40,6 @@ spec:
         # literal ", so the resolver receives a well-formed {{ resource "rayCluster" ... }} action. The
         # shell then compares the RESOLVED head service name against the known value.
         - "[ \"{{ resource \"rayCluster\" \"{.status.head.serviceName}\" }}\" = demo-cluster-head-svc ]"
-    periodSeconds: 5
   deploymentModifications:
     podModifications:
       additionalContainers:
