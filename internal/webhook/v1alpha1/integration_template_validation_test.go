@@ -30,9 +30,9 @@ func validTemplate() *workspacev1alpha1.WorkspaceIntegrationTemplate {
 				{Name: "rayClusterNamespace"},
 			},
 			ResourceRefs: []workspacev1alpha1.ResourceRef{{
-				Name: "rayCluster", APIVersion: "ray.io/v1", Kind: "RayCluster",
+				Name: "rayCluster", APIVersion: testRayAPIVersion, Kind: testRayClusterKind,
 				Metadata: workspacev1alpha1.ResourceRefMetadata{
-					Name:      "{{ .Parameters.rayClusterName }}",
+					Name:      testRayClusterNameExpr,
 					Namespace: "{{ .Parameters.rayClusterNamespace }}",
 				},
 			}},
