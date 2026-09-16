@@ -1,20 +1,61 @@
 # Integration Templates
 
-A **WorkspaceIntegrationTemplate** (WIT) injects runtime capabilities into a workspace pod: sidecar containers, volumes, and environment variables. Unlike a **WorkspaceTemplate**, which sets static defaults and bounds, a WIT resolves its values dynamically at reconcile time by reading a live Kubernetes resource and substituting template expressions.
+A **WorkspaceIntegrationTemplate** injects runtime capabilities into a workspace pod: sidecar containers, volumes, and environment variables. Unlike a **WorkspaceTemplate**, which sets static defaults and bounds, an integration template resolves its values dynamically at reconcile time by reading a live Kubernetes resource and substituting template expressions.
 
-A WIT has a 1:many relationship with workspaces. Multiple workspaces may attach the same template, each supplying its own parameters.
+A WorkspaceIntegrationTemplate has a 1:many relationship with workspaces. Multiple workspaces may attach the same template, each supplying its own parameters.
 
-## When to use a WIT
+## When to use an integration template
 
-Reach for a WIT when a workspace needs to connect to another resource that exists in the Kubernetes cluster, and the connection details are only known at runtime. The canonical case is wiring a workspace to a `RayCluster` or similar object: the WIT fetches that object, reads fields from it (host, port, name), and renders them into the workspace pod as sidecars or environment variables.
+Reach for a WorkspaceIntegrationTemplate when a workspace needs to connect to another resource that exists in the Kubernetes cluster, and the connection details are only known at runtime. The canonical case is wiring a workspace to a `RayCluster` or similar object: the template fetches that object, reads fields from it (host, port, name), and renders them into the workspace pod as sidecars or environment variables.
 
-Use a plain **WorkspaceTemplate** instead when the configuration is static (a fixed image, resource bounds, a default access strategy). Use a WIT when the configuration must be computed from another object's live state.
+Use a plain **WorkspaceTemplate** instead when the configuration is static (a fixed image, resource bounds, a default access strategy). Use a WorkspaceIntegrationTemplate when the configuration must be computed from another object's live state.
 
-Like access strategies, a WIT is an administrator-owned resource. Admins install a small set of vetted integrations; workspace users attach them by reference and supply parameters. In an enterprise cluster, workspace users should not have permission to create or edit integration templates directly.
+## Ownership and RBAC
+
+A WorkspaceIntegrationTemplate is intended to be an administrator-owned resource. An administrator installs a small set of vetted integrations; workspace users attach them by reference and supply parameter values.
+
+The API does not enforce that division. No field is reserved for administrators: whoever can write the resource writes all of it, `shareProcessNamespace` and the pod modifications included. RBAC is what establishes the division.
+
+### Permissions for workspace users
+
+Workspace users need `get` and `list` on `workspaceintegrationtemplates` to discover which integrations exist and which parameters each one declares. They must not have `create`, `update`, `patch`, or `delete`.
+
+Write access on this resource is equivalent to read access on any object the operator can reach in the namespace. The template names the `kind` and the JSONPath to read, and the operator performs that read.
+
+### Permissions for the operator
+
+The operator reads each object named in a template's `resourceRefs`, and a default install does not permit it. The kinds an integration references depend on the deployment rather than on the operator, so they are not part of the operator's generated ClusterRole. Granting the read is part of installing an integration.
+
+Grant `get` on the referenced kind to the operator's ServiceAccount. For a template that references a `RayCluster`, for example:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: jupyter-k8s-integration-reader
+rules:
+  - apiGroups: ["ray.io"]
+    resources: ["rayclusters"]
+    verbs: ["get"]
+```
+
+Bind it to the operator's ServiceAccount, or use a namespaced `Role` and `RoleBinding` to scope the grant to the namespaces that use the integration. `get` is sufficient on its own: the operator reads the object directly from the API server rather than through a cache, so it needs no `list` or `watch`.
+
+```{note}
+Resolution is fail-closed. Without this grant the read fails, no partial overlay is applied to the pod, and the workspace reports the integration as degraded. An access strategy needs no equivalent step, because the kinds its guided modes touch are known in advance and ship in the chart's ClusterRole.
+```
+
+### Vetting a template
+
+An administrator chooses the `kind` a template reads; the workspace user chooses which object of that kind it reads. `resourceRefs[].metadata.name` is rendered from a parameter the workspace supplies, and admission checks only that the parameter is present and non-empty, not what it names.
+
+An integration also does more than read the object it resolves. In the Ray integration the injected sidecar runs `ray start --address=...`, so the workspace joins the cluster it named.
+
+Vet a template on the assumption that any object of the referenced kind in the namespace is reachable through it, and scope each namespace to a single team.
 
 ## Usage
 
-A workspace user attaches an integration through `spec.integrationTemplateRefs`. Each entry names a WIT and supplies the parameter values the template declares:
+A workspace user attaches an integration through `spec.integrationTemplateRefs`. Each entry names a template and supplies the parameter values that template declares:
 
 ```yaml
 apiVersion: workspace.jupyter.org/v1alpha1
@@ -32,19 +73,19 @@ spec:
           value: team-ray
 ```
 
-`spec.integrationTemplateRefs` is capped at one entry for now. The reference resolves within the workspace's own namespace. As with templates and access strategies, a workspace may also reference a WIT in the [shared namespace](../templates/shared-namespace), a special namespace identified at the **Jupyter K8s** operator level.
+`spec.integrationTemplateRefs` is capped at one entry for now. The reference resolves within the workspace's own namespace. As with templates and access strategies, a workspace may also reference an integration template in the [shared namespace](../templates/shared-namespace), a special namespace identified at the **Jupyter K8s** operator level.
 
-An `integrationTemplateRefs` entry only declares which WIT to attach and the parameter values to use; it does not contain the injected sidecars, volumes, or environment variables. The controller computes those during reconciliation and records the resolved result in the workspace status. The workspace user does not author the template or write template expressions; they only choose a WIT and supply its parameter values.
+An `integrationTemplateRefs` entry only declares which template to attach and the parameter values to use; it does not contain the injected sidecars, volumes, or environment variables. The controller computes those during reconciliation and records the resolved result in the workspace status. The workspace user does not author the template or write template expressions; they only choose a template and supply its parameter values.
 
-## Authoring a WIT
+## Authoring an integration template
 
-Administrators define the template itself. These pages cover each part of a WIT spec:
+Administrators define the template itself. These pages cover each part of the spec:
 
 - [Parameters](parameters) — the contract of values a workspace must supply.
 - [Template expressions](template-expressions) — reading live resource fields with `{{ resource }}`, `{{ .Parameters }}`, and `{{ .Workspace }}`, and when the controller re-resolves.
 - [Deployment modifications](deployment-modifications) — the sidecars, volumes, and environment variables injected into the pod.
 - [Status probe](status-probe) — the report-only reachability check.
-- [Example setup](example) — a complete, working Ray integration.
+- [Example setup](example) — a complete, maintained Ray integration.
 
 ```{toctree}
 :hidden:

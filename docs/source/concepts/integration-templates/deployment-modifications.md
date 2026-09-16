@@ -1,12 +1,31 @@
 # Deployment modifications
 
-`spec.deploymentModifications.podModifications` is where a WIT actually changes the workspace pod. It uses the same shape as an access strategy's deployment modifications: `additionalContainers`, `initContainers`, `volumes`, `primaryContainerModifications.volumeMounts`, and `primaryContainerModifications.mergeEnv`. See [Access Strategies: Deployment Modifications](../access-strategies/deployment-modifications) for the field-by-field reference; the fields behave the same here.
+`spec.deploymentModifications.podModifications` declares what the integration adds to the workspace pod: `additionalContainers`, `initContainers`, `volumes`, `primaryContainerModifications.volumeMounts`, and `primaryContainerModifications.mergeEnv`. These fields take the same shape as the block of the same name on an access strategy; see [Access Strategies: Deployment Modifications](../access-strategies/deployment-modifications) for the field-by-field reference.
 
-Two differences matter:
+String values within these fields may carry template expressions — `{{ resource "<handle>" "<jsonpath>" }}`, `{{ .Parameters.<name> }}`, and `{{ .Workspace.* }}`. See [Template expressions](template-expressions).
 
-- **Template context.** A WIT resolves `{{ resource "<handle>" "<jsonpath>" }}`, `{{ .Parameters.<name> }}`, and `{{ .Workspace.* }}`. An access strategy instead exposes `.Workspace` and `.AccessStrategy`, and has no `resource` function. See [Template expressions](template-expressions).
-- **The result is frozen, not re-applied live.** This is the key distinction: an access strategy re-resolves its `mergeEnv` on every reconcile, so a change to its inputs flows straight through. A WIT does not work this way. It resolves once, records the rendered sidecars, volumes, and environment variables in `status.resolvedIntegrations`, and replays that frozen result on later reconciles. Editing the referenced resource does not re-render the workspace pod; the injection changes only when the parameters or the template itself change. See [Resolution and drift](template-expressions.md#resolution-and-drift).
+## What re-renders, and when
+
+The pod shape and the resolved resource values are not refreshed on the same schedule, and the difference determines whether an edit rolls the workspace pod.
+
+The pod shape — which sidecars and init containers, which volumes and mounts, which environment variable names, the container commands — is read from the template on every reconcile. An edit to the template therefore takes effect on the next reconcile and rolls the pod.
+
+The values that `{{ resource }}` expressions read out of the referenced object are resolved once and then frozen. They are recorded in `status.resolvedIntegrations[].values` as a map keyed `"<resourceRefID>|<jsonPath>"`, and later reconciles replay that map rather than re-reading the object. Editing the referenced object does not re-render the pod. Only the substitutions are stored, not the rendered pod spec, which keeps the status payload small.
+
+The values are captured again when the supplied parameters change or the template version changes. See [Resolution and drift](template-expressions.md#resolution-and-drift).
+
+```{note}
+This is the one behaviour that does not carry over from access strategies, which re-resolve `mergeEnv` on every reconcile so that a change to their inputs flows straight through to the pod.
+```
 
 ## shareProcessNamespace
 
-`spec.shareProcessNamespace` is an admin-only, pod-level toggle that shares the PID namespace across all containers in the workspace pod, so the workspace container can see and signal processes running in an injected sidecar (for example, to attach to a sidecar's local Ray session). Containers sharing a PID namespace can read each other's `/proc` (filesystem and environment), so injected containers should run as non-root.
+`spec.shareProcessNamespace` places every container in the workspace pod in a single process namespace, so that the workspace container can see and signal processes belonging to an injected sidecar.
+
+Sharing weakens the isolation between the containers in the pod, in two degrees.
+
+Every container sees the others' processes and their full command lines, because `/proc/<pid>/cmdline` is world-readable. A value passed to a sidecar as a command-line argument is therefore readable by the workspace container, and by any other sidecar, whatever user they run as. Pass secrets by environment variable or mounted file instead of on the command line.
+
+A container's environment and filesystem, read through `/proc/<pid>/environ` and `/proc/<pid>/root`, remain subject to normal file permissions: they are readable by another container only when both run as the same user, or when the reader runs as root or holds `CAP_SYS_PTRACE`. Running injected containers as non-root, with a UID distinct from the workspace container's, keeps that boundary intact.
+
+Even so, a pod that shares its process namespace is best treated as one trust domain rather than as a set of isolated containers.
