@@ -32,17 +32,19 @@ Grant `get` on the referenced kind to the operator's ServiceAccount. For a templ
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: jupyter-k8s-integration-reader
+  name: jupyter-k8s-integration-resource-reader
 rules:
   - apiGroups: ["ray.io"]
     resources: ["rayclusters"]
     verbs: ["get"]
 ```
 
-Bind it to the operator's ServiceAccount, or use a namespaced `Role` and `RoleBinding` to scope the grant to the namespaces that use the integration. `get` is sufficient on its own: the operator reads the object directly from the API server rather than through a cache, so it needs no `list` or `watch`.
+Bind it to the operator's ServiceAccount with a `ClusterRoleBinding`, alongside the operator's own role. `get` is sufficient on its own: the operator reads the object directly from the API server rather than through a cache, so it needs no `list` or `watch`.
+
+The grant is cluster-wide, but the read is not. A `resourceRef` resolves only in the referencing workspace's own namespace, and carries no namespace field to point elsewhere — the controller supplies the workspace's namespace itself. That bound comes from the controller, not from the shape of the grant, so scoping the role more narrowly is not what keeps an integration inside its namespace.
 
 ```{note}
-Resolution is fail-closed. Without this grant the read fails, no partial overlay is applied to the pod, and the workspace reports the integration as degraded. An access strategy needs no equivalent step, because the kinds its guided modes touch are known in advance and ship in the chart's ClusterRole.
+Resolution is fail-closed. Without this grant the read fails, no partial overlay is applied to the pod, and the workspace reports the integration as degraded.
 ```
 
 ### Vetting a template
@@ -51,7 +53,7 @@ An administrator chooses the `kind` a template reads; the workspace user chooses
 
 An integration also does more than read the object it resolves. In the Ray integration the injected sidecar runs `ray start --address=...`, so the workspace joins the cluster it named.
 
-Vet a template on the assumption that any object of the referenced kind in the namespace is reachable through it, and scope each namespace to a single team.
+Vet a template on the assumption that any object of the referenced kind in the workspace's own namespace is reachable through it.
 
 ## Usage
 

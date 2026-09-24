@@ -17,7 +17,7 @@ Both sides of the contract are checked at admission:
 
 Catching these at admission keeps resolution failures out of the reconcile loop, so a rendered pod never silently loses an environment variable because a parameter resolved to empty.
 
-## What admission checks
+## Where expressions are checked
 
 Admission validates a template by rendering it with each declared parameter seeded, so it reports on the expressions that this rendering evaluates. That is the `{{ .Parameters.<name> }}` form outside a conditional, which is therefore the form to prefer.
 

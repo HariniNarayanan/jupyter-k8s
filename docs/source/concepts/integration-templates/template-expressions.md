@@ -25,7 +25,9 @@ resourceRefs:
 
 An integration template requires exactly one `resourceRef` today (minimum one, capped at one). A template exists to resolve values from a referenced resource, so at least one ref is required.
 
-The `kind` and the JSONPath define the reach of the integration. Because `metadata.name` is normally rendered from a parameter the workspace supplies, the template fixes the kind while the workspace user selects the object. The operator must also be granted read access to that kind; see [Ownership and RBAC](index.md#ownership-and-rbac).
+The workspace user chooses which object to fetch, so the `kind` and JSONPath you write define the entire blast radius of the integration.
+
+The operator must also be granted read access to that kind; see [Ownership and RBAC](index.md#ownership-and-rbac).
 
 ## Resolution and drift
 
